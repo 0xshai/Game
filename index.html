@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>游戏中心</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  min-height: 100vh;
+  font-family: Arial, sans-serif;
+}
+
+/* 主页面布局 */
+.main-page {
+  padding: 40px 20px;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+.main-page h1 {
+  color: #fff;
+  text-align: center;
+  margin-bottom: 40px;
+  font-size: 36px;
+  text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+}
+.game-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 30px;
+  max-width: 1000px;
+  margin: 0 auto;
+}
+.game-card {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 15px;
+  padding: 30px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+}
+.game-card:hover {
+  transform: translateY(-10px);
+  background: rgba(255, 255, 255, 0.25);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
+}
+.game-card .icon {
+  font-size: 60px;
+  margin-bottom: 15px;
+}
+.game-card h3 {
+  color: #fff;
+  font-size: 20px;
+  margin-bottom: 10px;
+}
+.game-card p {
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 14px;
+}
+.game-card.coming-soon {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.game-card.coming-soon:hover {
+  transform: none;
+  background: rgba(255, 255, 255, 0.15);
+}
+
+/* 游戏弹窗 */
+.game-modal {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.9);
+  z-index: 1000;
+  justify-content: center;
+  align-items: center;
+}
+.game-modal.active {
+  display: flex;
+}
+.modal-content {
+  position: relative;
+  width: 90vw;
+  height: 90vh;
+  max-width: 1400px;
+  max-height: 900px;
+}
+.modal-content iframe {
+  width: 100%;
+  height: 100%;
+  border: none;
+  border-radius: 10px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+.close-btn {
+  position: absolute;
+  top: -50px;
+  right: 0;
+  background: #ff6347;
+  color: #fff;
+  border: none;
+  padding: 12px 24px;
+  border-radius: 8px;
+  font-size: 16px;
+  cursor: pointer;
+  transition: background 0.3s;
+}
+.close-btn:hover {
+  background: #ff4500;
+}
+</style>
+</head>
+<body>
+
+<!-- 主页面 -->
+<div class="main-page" id="mainPage">
+  <h1>游戏中心</h1>
+  <div class="game-grid">
+    <!-- 游戏1：打蜜蜂 -->
+    <div class="game-card" onclick="openGame('bee_shooter.html')">
+      <div class="icon">🐝</div>
+      <h3>打蜜蜂</h3>
+      <p>控制飞机消灭蜜蜂队列</p>
+    </div>
+
+    <!-- 游戏2：五子棋 -->
+    <div class="game-card" onclick="openGame('gomoku.html')">
+      <div class="icon">⚫</div>
+      <h3>五子棋</h3>
+      <p>双人对战五子连珠</p>
+    </div>
+
+    <!-- 游戏3：围棋 -->
+    <div class="game-card" onclick="openGame('go_game.html')">
+      <div class="icon">⚪</div>
+      <h3>围棋</h3>
+      <p>人机对战黑白博弈</p>
+    </div>
+
+    <!-- 游戏4：打地鼠 -->
+    <div class="game-card" onclick="openGame('whack_a_mole.html')">
+      <div class="icon">🔨</div>
+      <h3>打地鼠</h3>
+      <p>快速点击消灭地鼠</p>
+    </div>
+  </div>
+</div>
+
+<!-- 游戏弹窗 -->
+<div class="game-modal" id="gameModal">
+  <div class="modal-content">
+    <button class="close-btn" onclick="closeGame()">关闭游戏 (ESC)</button>
+    <iframe id="gameFrame" src=""></iframe>
+  </div>
+</div>
+
+<script>
+// 打开游戏
+function openGame(gameUrl) {
+  const modal = document.getElementById('gameModal');
+  const frame = document.getElementById('gameFrame');
+  frame.src = gameUrl;
+  modal.classList.add('active');
+}
+
+// 关闭游戏
+function closeGame() {
+  const modal = document.getElementById('gameModal');
+  const frame = document.getElementById('gameFrame');
+  frame.src = '';
+  modal.classList.remove('active');
+}
+
+// ESC键关闭游戏
+document.addEventListener('keydown', (e) => {
+  if (e.code === 'Escape') {
+    closeGame();
+  }
+});
+
+// 点击背景关闭游戏
+document.getElementById('gameModal').addEventListener('click', (e) => {
+  if (e.target === e.currentTarget) {
+    closeGame();
+  }
+});
+</script>
+
+</body>
+</html>

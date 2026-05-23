@@ -1,0 +1,613 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>打蜜蜂小游戏</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { overflow: hidden; background: #87CEEB; display: flex; justify-content: center; align-items: center; height: 100vh; font-family: Arial, sans-serif; }
+canvas { display: block; background: linear-gradient(to bottom, #87CEEB 0%, #98FB98 100%); cursor: none; }
+#ui {
+  position: fixed; top: 20px; left: 20px;
+  color: #fff; font-size: 24px; font-weight: bold;
+  text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+  pointer-events: none; z-index: 10;
+}
+#timer {
+  position: fixed; top: 20px; right: 20px;
+  color: #fff; font-size: 32px; font-weight: bold;
+  text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+  pointer-events: none; z-index: 10;
+}
+#gameOver {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.7);
+  display: none; align-items: center; justify-content: center;
+  z-index: 20;
+}
+#gameOver .content {
+  text-align: center; color: #fff;
+}
+#gameOver h1 { font-size: 48px; margin-bottom: 20px; }
+#gameOver p { font-size: 24px; margin-bottom: 30px; }
+#gameOver button {
+  padding: 15px 40px; font-size: 20px;
+  background: #FFD700; border: none; border-radius: 8px;
+  cursor: pointer; color: #333; font-weight: bold;
+}
+#gameOver button:hover { background: #FFA500; }
+#startScreen {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.6);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 20;
+}
+#startScreen .content {
+  text-align: center; color: #fff;
+}
+#startScreen h1 { font-size: 48px; margin-bottom: 20px; color: #FFD700; }
+#startScreen p { font-size: 18px; margin-bottom: 30px; line-height: 1.8; }
+#startScreen button {
+  padding: 15px 40px; font-size: 20px;
+  background: #FFD700; border: none; border-radius: 8px;
+  cursor: pointer; color: #333; font-weight: bold;
+}
+#startScreen button:hover { background: #FFA500; }
+</style>
+</head>
+<body>
+
+<div id="ui">
+  <div>得分: <span id="score">0</span></div>
+  <div>生命: <span id="lives">3</span></div>
+  <div>剩余: <span id="remaining">0</span></div>
+</div>
+
+<div id="timer">时间: <span id="timeLeft">50</span>s</div>
+
+<div id="startScreen">
+  <div class="content">
+    <h1>打蜜蜂小游戏</h1>
+    <p>移动鼠标控制飞机左右移动<br>飞机自动发射子弹<br>在50秒内消灭所有蜜蜂！</p>
+    <button onclick="startGame()">开始游戏</button>
+  </div>
+</div>
+
+<div id="gameOver">
+  <div class="content">
+    <h1 id="endTitle">游戏结束</h1>
+    <p id="endMessage">最终得分: <span id="finalScore">0</span></p>
+    <button onclick="restartGame()">重新开始</button>
+  </div>
+</div>
+
+<canvas id="gameCanvas"></canvas>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+// 设置画布大小
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
+
+// 音频上下文
+let audioCtx = null;
+
+// 初始化音频上下文
+function initAudio() {
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+}
+
+// 播放击中音效
+function playHitSound() {
+  if (!audioCtx) return;
+
+  const oscillator = audioCtx.createOscillator();
+  const gainNode = audioCtx.createGain();
+
+  oscillator.connect(gainNode);
+  gainNode.connect(audioCtx.destination);
+
+  oscillator.type = 'square';
+  oscillator.frequency.setValueAtTime(800, audioCtx.currentTime);
+  oscillator.frequency.exponentialRampToValueAtTime(400, audioCtx.currentTime + 0.1);
+
+  gainNode.gain.setValueAtTime(0.3, audioCtx.currentTime);
+  gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+
+  oscillator.start(audioCtx.currentTime);
+  oscillator.stop(audioCtx.currentTime + 0.1);
+}
+
+// 游戏状态
+let gameRunning = false;
+let score = 0;
+let lives = 3;
+let timeLeft = 50;
+let frameCount = 0;
+let lastTimeUpdate = 0;
+
+// 攻击蜜蜂相关状态
+let attackingBee = null; // 当前正在攻击的蜜蜂
+let attackCooldown = 0;  // 攻击冷却时间（帧数）
+let nextAttackDelay = 60; // 下次攻击前的延迟（60帧 = 1秒）
+
+// 玩家飞机
+const player = {
+  x: canvas.width / 2,
+  y: canvas.height - 80,
+  width: 50,
+  height: 40
+};
+
+// 子弹数组
+let bullets = [];
+
+// 蜜蜂数组
+let bees = [];
+
+// 粒子效果数组
+let particles = [];
+
+// 键盘事件
+document.addEventListener('keydown', (e) => {
+  if (e.code === 'Escape' && gameRunning) {
+    gameRunning = false;
+    document.getElementById('startScreen').style.display = 'flex';
+    document.getElementById('gameOver').style.display = 'none';
+  }
+});
+
+// 鼠标移动事件
+canvas.addEventListener('mousemove', (e) => {
+  if (!gameRunning) return;
+  player.x = e.clientX;
+  player.y = e.clientY;
+  // 限制飞机不超出边界
+  player.x = Math.max(player.width / 2, Math.min(canvas.width - player.width / 2, player.x));
+  player.y = Math.max(player.height / 2, Math.min(canvas.height - player.height / 2, player.y));
+});
+
+// 绘制飞机
+function drawPlane(x, y) {
+  ctx.save();
+  ctx.translate(x, y);
+
+  // 机身
+  ctx.fillStyle = '#4169E1';
+  ctx.beginPath();
+  ctx.moveTo(0, -20);
+  ctx.lineTo(-15, 15);
+  ctx.lineTo(0, 10);
+  ctx.lineTo(15, 15);
+  ctx.closePath();
+  ctx.fill();
+
+  // 机翼
+  ctx.fillStyle = '#1E90FF';
+  ctx.fillRect(-25, 0, 50, 5);
+
+  // 尾翼
+  ctx.fillStyle = '#FF6347';
+  ctx.fillRect(-3, 10, 6, 10);
+
+  // 驾驶舱
+  ctx.fillStyle = '#87CEEB';
+  ctx.beginPath();
+  ctx.arc(0, -5, 5, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.restore();
+}
+
+// 绘制蜜蜂
+function drawBee(bee) {
+  ctx.save();
+  ctx.translate(bee.x, bee.y);
+
+  // 身体（黄色）
+  ctx.fillStyle = '#FFD700';
+  ctx.beginPath();
+  ctx.ellipse(0, 0, bee.width / 2, bee.height / 2, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 黑色条纹
+  ctx.fillStyle = '#000';
+  ctx.fillRect(-8, -5, 4, 10);
+  ctx.fillRect(2, -5, 4, 10);
+
+  // 眼睛
+  ctx.fillStyle = '#fff';
+  ctx.beginPath();
+  ctx.arc(-5, -8, 3, 0, Math.PI * 2);
+  ctx.arc(5, -8, 3, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = '#000';
+  ctx.beginPath();
+  ctx.arc(-5, -8, 1.5, 0, Math.PI * 2);
+  ctx.arc(5, -8, 1.5, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 翅膀
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+  const wingOffset = Math.sin(frameCount * 0.3) * 5;
+  ctx.beginPath();
+  ctx.ellipse(-10, -10 + wingOffset, 8, 5, -0.5, 0, Math.PI * 2);
+  ctx.ellipse(10, -10 + wingOffset, 8, 5, 0.5, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 尾巴尖刺
+  ctx.fillStyle = '#000';
+  ctx.beginPath();
+  ctx.moveTo(0, bee.height / 2);
+  ctx.lineTo(-3, bee.height / 2 + 5);
+  ctx.lineTo(3, bee.height / 2 + 5);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.restore();
+}
+
+// 创建蜜蜂队列
+function createBeeFormation() {
+  bees = [];
+  const rows = 4;
+  const cols = 8;
+  const spacingX = 70;
+  const spacingY = 50;
+  const startX = (canvas.width - (cols - 1) * spacingX) / 2;
+  const startY = 80;
+
+  for (let row = 0; row < rows; row++) {
+    for (let col = 0; col < cols; col++) {
+      bees.push({
+        x: startX + col * spacingX,
+        y: startY + row * spacingY,
+        width: 30,
+        height: 25,
+        baseX: startX + col * spacingX,
+        baseY: startY + row * spacingY,
+        wobble: Math.random() * Math.PI * 2,
+        alive: true,
+        isAttacking: false, // 是否正在攻击
+        attackTargetY: canvas.height - 100, // 攻击目标Y位置（接近玩家）
+        attackSpeed: 4, // 攻击速度
+        attackState: 'idle' // idle, diving, returning
+      });
+    }
+  }
+}
+
+// 选择一只随机蜜蜂进行攻击
+function selectAttackingBee() {
+  const aliveBees = bees.filter(bee => bee.alive && !bee.isAttacking);
+  if (aliveBees.length === 0) return null;
+  
+  const randomIndex = Math.floor(Math.random() * aliveBees.length);
+  const bee = aliveBees[randomIndex];
+  bee.isAttacking = true;
+  bee.attackState = 'diving';
+  return bee;
+}
+
+// 创建子弹
+function shoot() {
+  bullets.push({
+    x: player.x,
+    y: player.y - 20,
+    width: 4,
+    height: 10,
+    speed: 8
+  });
+}
+
+// 创建爆炸粒子
+function createExplosion(x, y) {
+  for (let i = 0; i < 15; i++) {
+    particles.push({
+      x: x,
+      y: y,
+      vx: (Math.random() - 0.5) * 8,
+      vy: (Math.random() - 0.5) * 8,
+      life: 30,
+      color: `hsl(${Math.random() * 60 + 30}, 100%, 50%)`
+    });
+  }
+}
+
+// 更新游戏逻辑
+function update() {
+  frameCount++;
+
+  // 自动发射子弹（每40帧发射一次，密度再减半）
+  if (frameCount % 40 === 0) {
+    shoot();
+  }
+
+  // 更新时间（每秒更新一次）
+  const now = performance.now();
+  if (now - lastTimeUpdate >= 1000) {
+    timeLeft--;
+    lastTimeUpdate = now;
+    document.getElementById('timeLeft').textContent = timeLeft;
+
+    if (timeLeft <= 0) {
+      gameOver(false); // 超时失败
+      return;
+    }
+  }
+
+  // 更新子弹位置
+  bullets = bullets.filter(bullet => {
+    bullet.y -= bullet.speed;
+    return bullet.y > -10;
+  });
+
+  // 管理蜜蜂攻击逻辑
+  if (attackingBee) {
+    // 当前有蜜蜂在攻击
+    if (attackingBee.attackState === 'diving') {
+      // 俯冲阶段：直接飞向玩家位置
+      const dx = player.x - attackingBee.x;
+      const dy = player.y - attackingBee.y;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+      
+      // 如果非常接近玩家，判定为击中
+      if (distance < 30) {
+        createExplosion(attackingBee.x, attackingBee.y);
+        playHitSound();
+        
+        // 蜜蜂消失
+        attackingBee.alive = false;
+        attackingBee.isAttacking = false;
+        attackingBee = null;
+        attackCooldown = nextAttackDelay;
+        
+        // 失去一条命
+        lives--;
+        document.getElementById('lives').textContent = lives;
+        
+        if (lives <= 0) {
+          gameOver(false);
+          return;
+        }
+      } else {
+        // 继续飞向玩家
+        attackingBee.x += (dx / distance) * attackingBee.attackSpeed;
+        attackingBee.y += (dy / distance) * attackingBee.attackSpeed;
+        
+        // 检测附近子弹，主动躲避（但优先级较低）
+        let dodgeDirection = 0;
+        for (const bullet of bullets) {
+          const bdx = bullet.x - attackingBee.x;
+          const bdy = bullet.y - attackingBee.y;
+          const bDistance = Math.sqrt(bdx * bdx + bdy * bdy);
+          
+          // 如果子弹在蜜蜂周围60像素范围内，开始躲避
+          if (bDistance < 60 && bullet.y < attackingBee.y) {
+            if (bdx > 0) {
+              dodgeDirection = -2; // 子弹在右边，向左躲
+            } else {
+              dodgeDirection = 2; // 子弹在左边，向右躲
+            }
+            break;
+          }
+        }
+        
+        // 如果有躲避方向，添加横向移动
+        if (dodgeDirection !== 0) {
+          attackingBee.x += dodgeDirection;
+        }
+        
+        // 限制蜜蜂不超出屏幕边界
+        attackingBee.x = Math.max(20, Math.min(canvas.width - 20, attackingBee.x));
+      }
+    } else if (attackingBee.attackState === 'returning') {
+      // 返回阶段：飞回原位
+      const dx = attackingBee.baseX - attackingBee.x;
+      const dy = attackingBee.baseY - attackingBee.y;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+      
+      if (distance < 5) {
+        // 回到原位，攻击结束
+        attackingBee.isAttacking = false;
+        attackingBee.attackState = 'idle';
+        attackingBee.x = attackingBee.baseX;
+        attackingBee.y = attackingBee.baseY;
+        attackingBee = null;
+        attackCooldown = nextAttackDelay;
+      } else {
+        // 继续飞回原位
+        attackingBee.x += (dx / distance) * 2;
+        attackingBee.y += (dy / distance) * 2;
+      }
+    }
+  } else {
+    // 没有蜜蜂在攻击，检查冷却时间
+    if (attackCooldown > 0) {
+      attackCooldown--;
+    } else {
+      // 冷却结束，选择新的蜜蜂攻击
+      attackingBee = selectAttackingBee();
+    }
+  }
+
+  // 更新蜜蜂位置（轻微漂浮，攻击中的蜜蜂除外）
+  bees.forEach(bee => {
+    if (!bee.alive || bee.isAttacking) return;
+    bee.wobble += 0.03;
+    bee.x = bee.baseX + Math.sin(bee.wobble) * 10;
+    bee.y = bee.baseY + Math.cos(bee.wobble * 0.7) * 5;
+  });
+
+  // 检查子弹与蜜蜂碰撞
+  bullets.forEach((bullet, bIndex) => {
+    bees.forEach((bee, beeIndex) => {
+      if (!bee.alive) return;
+
+      if (bullet.x > bee.x - bee.width / 2 &&
+          bullet.x < bee.x + bee.width / 2 &&
+          bullet.y > bee.y - bee.height / 2 &&
+          bullet.y < bee.y + bee.height / 2) {
+        // 击中蜜蜂
+        createExplosion(bee.x, bee.y);
+        playHitSound();
+        
+        // 如果正在攻击的蜜蜂被击中
+        if (bee === attackingBee) {
+          attackingBee = null;
+          attackCooldown = nextAttackDelay;
+        }
+        
+        bee.alive = false;
+        bullets.splice(bIndex, 1);
+        score += 10;
+        updateUI();
+      }
+    });
+  });
+
+  // 更新粒子
+  particles = particles.filter(p => {
+    p.x += p.vx;
+    p.y += p.vy;
+    p.life--;
+    return p.life > 0;
+  });
+
+  // 检查是否全部消灭
+  const aliveBees = bees.filter(bee => bee.alive).length;
+  if (aliveBees === 0) {
+    gameOver(true); // 胜利
+  }
+}
+
+// 渲染游戏
+function render() {
+  // 清空画布
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // 绘制背景云朵装饰
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+  ctx.beginPath();
+  ctx.arc(100 + Math.sin(frameCount * 0.01) * 20, 100, 40, 0, Math.PI * 2);
+  ctx.arc(150 + Math.sin(frameCount * 0.01) * 20, 110, 35, 0, Math.PI * 2);
+  ctx.arc(50 + Math.sin(frameCount * 0.01) * 20, 110, 35, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.arc(canvas.width - 150 + Math.cos(frameCount * 0.008) * 15, 150, 45, 0, Math.PI * 2);
+  ctx.arc(canvas.width - 90 + Math.cos(frameCount * 0.008) * 15, 160, 40, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 绘制子弹
+  ctx.fillStyle = '#FF4500';
+  bullets.forEach(bullet => {
+    ctx.fillRect(bullet.x - bullet.width / 2, bullet.y, bullet.width, bullet.height);
+  });
+
+  // 绘制蜜蜂（只绘制存活的）
+  bees.forEach(bee => {
+    if (bee.alive) {
+      drawBee(bee);
+    }
+  });
+
+  // 绘制玩家飞机
+  drawPlane(player.x, player.y);
+
+  // 绘制粒子
+  particles.forEach(p => {
+    ctx.globalAlpha = p.life / 30;
+    ctx.fillStyle = p.color;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
+    ctx.fill();
+  });
+  ctx.globalAlpha = 1;
+}
+
+// 更新UI
+function updateUI() {
+  document.getElementById('score').textContent = score;
+  document.getElementById('lives').textContent = lives;
+  const aliveBees = bees.filter(bee => bee.alive).length;
+  document.getElementById('remaining').textContent = aliveBees;
+}
+
+// 游戏主循环
+function gameLoop() {
+  if (!gameRunning) return;
+
+  update();
+  render();
+  requestAnimationFrame(gameLoop);
+}
+
+// 开始游戏
+function startGame() {
+  initAudio();
+  document.getElementById('startScreen').style.display = 'none';
+  gameRunning = true;
+  score = 0;
+  lives = 3;
+  timeLeft = 50;
+  bullets = [];
+  particles = [];
+  frameCount = 0;
+  lastTimeUpdate = performance.now();
+
+  // 创建蜜蜂队列
+  createBeeFormation();
+
+  document.getElementById('timeLeft').textContent = timeLeft;
+  updateUI();
+  gameLoop();
+}
+
+// 游戏结束
+function gameOver(won) {
+  gameRunning = false;
+  const endTitle = document.getElementById('endTitle');
+  const endMessage = document.getElementById('endMessage');
+
+  if (won) {
+    endTitle.textContent = '恭喜过关！';
+    endTitle.style.color = '#FFD700';
+    endMessage.innerHTML = `得分: ${score}<br>剩余时间: ${timeLeft}秒<br>剩余生命: ${lives}`;
+  } else {
+    if (lives <= 0) {
+      endTitle.textContent = '游戏结束';
+      endTitle.style.color = '#FF6347';
+      endMessage.innerHTML = `飞机被击毁！<br>得分: ${score}`;
+    } else {
+      endTitle.textContent = '时间到！';
+      endTitle.style.color = '#FF6347';
+      const aliveBees = bees.filter(bee => bee.alive).length;
+      endMessage.innerHTML = `得分: ${score}<br>还有 ${aliveBees} 只蜜蜂未被消灭`;
+    }
+  }
+
+  document.getElementById('gameOver').style.display = 'flex';
+}
+
+// 重新开始
+function restartGame() {
+  document.getElementById('gameOver').style.display = 'none';
+  startGame();
+}
+
+// 窗口大小调整
+window.addEventListener('resize', () => {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+  player.y = canvas.height - 80;
+});
+</script>
+
+</body>
+</html>
