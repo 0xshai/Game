@@ -2,7 +2,7 @@
 
 一个精美的 HTML5 游戏集合，采用现代化视觉设计，支持桌面和移动设备。
 
-🔗 **在线试玩**: [https://0xshai.github.io/Game](https://0xshai.github.io/Game)
+🔗 **在线试玩**: [https://gameflow.pages.dev](https://gameflow.pages.dev)
 
 ---
 
