@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>霓虹俄罗斯方块 - 终极版</title>
+<style>
+    *{margin:0;padding:0;box-sizing:border-box;font-family:"Microsoft YaHei",sans-serif}
+    body{
+        background:linear-gradient(160deg,#0d0d20,#15153a,#202055);
+        min-height:100vh;
+        display:flex;justify-content:center;align-items:center;
+        color:#fff;overflow:hidden;
+    }
+    .game-box{
+        display:flex;gap:26px;align-items:flex-start;
+    }
+    #canvas{
+        border:3px solid #00e5ff;
+        border-radius:14px;
+        background:#0a0a1a;
+        box-shadow:0 0 50px #00e5ff66, 0 0 100px #00e5ff22;
+    }
+    .side{
+        display:flex;flex-direction:column;gap:16px;width:160px;
+    }
+    .card{
+        background:#141432;
+        border:1px solid #00e5ff44;
+        border-radius:14px;
+        padding:14px;text-align:center;
+        box-shadow:0 6px 16px #00000044;
+        backdrop-filter:blur(4px);
+    }
+    .card h3{
+        color:#00e5ff;font-size:15px;margin-bottom:8px;
+        text-shadow:0 0 8px #00e5ff;
+    }
+    .card p{
+        font-size:26px;font-weight:700;color:#fff;
+        text-shadow:0 0 6px #fff;
+    }
+    #next{
+        width:100%;height:110px;background:#0e0e25;border-radius:10px;
+    }
+    .btn{
+        background:linear-gradient(90deg,#00e5ff,#0099ff);
+        color:#000;font-weight:700;
+        border:none;border-radius:12px;
+        padding:16px;font-size:16px;
+        cursor:pointer;transition:0.2s;
+        box-shadow:0 6px 16px #00e5ff66;
+        text-shadow:0 0 4px #fff;
+    }
+    .btn:hover{transform:scale(1.06);box-shadow:0 0 25px #00e5ff;}
+    .btn-pause{
+        background:linear-gradient(90deg, #ff8800, #ff4400);
+        box-shadow:0 6px 16px #ff880066;
+        margin-top:4px;
+    }
+    .keys{
+        background:#14143288;
+        border:1px solid #00e5ff33;
+        border-radius:12px;
+        padding:12px;
+        font-size:12px;
+        line-height:1.6;
+        color:#eee;
+        text-align:left;
+        margin-top:4px;
+    }
+    .keys strong{
+        color:#00e5ff;
+        display:inline-block;
+        width:50px;
+        text-shadow:0 0 4px #00e5ff;
+    }
+</style>
+</head>
+<body>
+
+<div class="game-box">
+    <div>
+        <canvas id="canvas" width="300" height="600"></canvas>
+    </div>
+    <div class="side">
+        <div class="card">
+            <h3>下一个</h3>
+            <canvas id="next" width="100" height="100"></canvas>
+        </div>
+        <div class="card">
+            <h3>分数</h3>
+            <p id="score">0</p>
+        </div>
+        <div class="card">
+            <h3>等级</h3>
+            <p id="level">1</p>
+        </div>
+        <button class="btn" id="start">开始游戏</button>
+        <button class="btn btn-pause" id="pause">暂停游戏</button>
+        
+        <div class="keys">
+            <div><strong>↑</strong> 旋转</div>
+            <div><strong>←→</strong> 移动</div>
+            <div><strong>↓</strong> 加速</div>
+            <div><strong>空格</strong> 立即落地</div>
+            <div><strong>P</strong> 暂停/继续</div>
+        </div>
+    </div>
+</div>
+
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const nextCanvas = document.getElementById('next');
+const nctx = nextCanvas.getContext('2d');
+
+const BLOCK = 30;
+const COLS = 10;
+const ROWS = 20;
+const colors = [
+    "#00e5ff", "#faff00", "#ff00c8",
+    "#00ff88", "#ff4444", "#4466ff", "#ffaa00"
+];
+const shapes = [
+    [[0,0,0,0],[1,1,1,1]],
+    [[1,1],[1,1]],
+    [[0,1,0],[1,1,1]],
+    [[0,1,1],[1,1,0]],
+    [[1,1,0],[0,1,1]],
+    [[1,0,0],[1,1,1]],
+    [[0,0,1],[1,1,1]]
+];
+
+let board = Array(ROWS).fill().map(()=>Array(COLS).fill(0));
+let score=0, level=1, lines=0;
+let current, next, gameLoop, dropTime=0, dropSpeed=1000;
+let gameOver=false, playing=false, paused=false;
+
+// ========== 修复：按键防抖 ==========
+let keyCooldown = {};
+const COOLDOWN_TIME = 60;
+
+let audioContext;
+function initAudio() {
+    if (!audioContext) audioContext = new AudioContext();
+}
+
+function playNote(freq, dur, type="sine", vol=0.2) {
+    initAudio();
+    const o = audioContext.createOscillator();
+    const g = audioContext.createGain();
+    o.connect(g);
+    g.connect(audioContext.destination);
+    o.frequency.value = freq;
+    o.type = type;
+    o.start();
+    g.gain.value = vol;
+    g.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + dur/1000);
+    setTimeout(()=>o.stop(), dur);
+}
+
+function soundMove()  { playNote(420, 60, "sine", 0.18); }
+function soundDrop()  { playNote(320, 100, "triangle", 0.25); }
+function soundRotate(){ playNote(520, 70, "sine", 0.2); }
+function soundClear() {
+    playNote(660, 120, "sine", 0.3);
+    setTimeout(()=>playNote(780,160,"sine",0.35), 60);
+}
+function soundStart() {
+    playNote(520,100,"sine",0.3);
+    setTimeout(()=>playNote(660,180,"sine",0.4), 50);
+}
+function soundOver() {
+    playNote(280,200,"triangle",0.25);
+    setTimeout(()=>playNote(220,300,"sawtooth",0.25), 120);
+}
+function soundPause() { playNote(220, 150, "sine", 0.2); }
+function soundResume() { playNote(520, 150, "sine", 0.2); }
+
+function newPiece(type) {
+    return {shape:shapes[type], color:colors[type], x:4, y:0};
+}
+function randomPiece() {
+    return newPiece(Math.floor(Math.random()*shapes.length));
+}
+
+function drawBlock(x,y,c,ctx,size=BLOCK){
+    ctx.fillStyle=c;
+    ctx.fillRect(x*size+1,y*size+1,size-2,size-2);
+    ctx.strokeStyle="#ffffffaa";
+    ctx.strokeRect(x*size+1,y*size+1,size-2,size-2);
+}
+
+function collide(shape,x,y){
+    for(let r=0;r<shape.length;r++){
+        for(let c=0;c<shape[r].length;c++){
+            if(shape[r][c]){
+                let nx=x+c, ny=y+r;
+                if(nx<0||nx>=COLS||ny>=ROWS) return true;
+                if(ny>=0&&board[ny][nx]) return true;
+            }
+        }
+    }
+    return false;
+}
+
+function rotate(s){
+    return s[0].map((_,i)=>s.map(r=>r[i]).reverse());
+}
+
+function drawBoard(){
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    for(let r=0;r<ROWS;r++){
+        for(let c=0;c<COLS;c++){
+            if(board[r][c]) drawBlock(c,r,board[r][c],ctx);
+        }
+    }
+    if(!current) return;
+    for(let r=0;r<current.shape.length;r++){
+        for(let c=0;c<current.shape[r].length;c++){
+            if(current.shape[r][c]) drawBlock(current.x+c,current.y+r,current.color,ctx);
+        }
+    }
+    nctx.clearRect(0,0,nextCanvas.width,nextCanvas.height);
+    if(next){
+        let s=next.shape;
+        for(let r=0;r<s.length;r++){
+            for(let c=0;c<s[r].length;c++){
+                if(s[r][c]) drawBlock(c+1,r+1,next.color,nctx,22);
+            }
+        }
+    }
+
+    if(paused){
+        ctx.fillStyle="rgba(0,0,0,0.6)";
+        ctx.fillRect(0,0,canvas.width,canvas.height);
+        ctx.font="bold 32px Arial";
+        ctx.fillStyle="#00e5ff";
+        ctx.textAlign="center";
+        ctx.fillText("已暂停",canvas.width/2,canvas.height/2);
+    }
+}
+
+function lock(){
+    for(let r=0;r<current.shape.length;r++){
+        for(let c=0;c<current.shape[r].length;c++){
+            if(current.shape[r][c]){
+                let y=current.y+r, x=current.x+c;
+                if(y<0){gameOver=true;return;}
+                board[y][x]=current.color;
+            }
+        }
+    }
+    checkLines();
+    current=next;
+    next=randomPiece();
+    if(collide(current.shape,current.x,current.y)) gameOver=true;
+}
+
+function checkLines(){
+    let cleared=0;
+    for(let r=ROWS-1;r>=0;r--){
+        if(board[r].every(v=>v)){
+            board.splice(r,1);
+            board.unshift(Array(COLS).fill(0));
+            cleared++;r++;
+        }
+    }
+    if(cleared>0){
+        soundClear();
+        score+=cleared*100*level;
+        lines+=cleared;
+        level=Math.floor(lines/10)+1;
+        dropSpeed=Math.max(100,1000-level*70);
+        updateUI();
+    }
+}
+
+function updateUI(){
+    document.getElementById("score").innerText=score;
+    document.getElementById("level").innerText=level;
+}
+
+function drop(){
+    if(!collide(current.shape,current.x,current.y+1)) current.y++;
+    else {lock();soundDrop();}
+}
+
+function gameStep(t){
+    if(gameOver||!playing||paused)return;
+    if(t-dropTime>dropSpeed){
+        drop();
+        dropTime=t;
+    }
+    drawBoard();
+    gameLoop=requestAnimationFrame(gameStep);
+}
+
+function startGame(){
+    gameOver=false;
+    playing=true;
+    paused=false;
+    board=Array(ROWS).fill().map(()=>Array(COLS).fill(0));
+    score=0;level=1;lines=0;dropSpeed=1000;
+    current=randomPiece();
+    next=randomPiece();
+    updateUI();
+    soundStart();
+    cancelAnimationFrame(gameLoop);
+    gameStep(0);
+}
+
+function togglePause(){
+    if(!playing||gameOver)return;
+    paused=!paused;
+    paused ? soundPause() : soundResume();
+    if(!paused) gameStep(0);
+    drawBoard();
+}
+
+// ========== 彻底修复：按键系统 ==========
+document.addEventListener("keydown",e=>{
+    if(!playing || gameOver) return;
+
+    // P 暂停 单独处理
+    if(e.key.toLowerCase() === "p") {
+        if(!keyCooldown.p){
+            keyCooldown.p = true;
+            setTimeout(()=>keyCooldown.p=false, 200);
+            togglePause();
+        }
+        e.preventDefault();
+        return;
+    }
+
+    if(paused) return;
+
+    // 防抖：防止连续触发
+    if(keyCooldown[e.code]) return;
+    keyCooldown[e.code] = true;
+    setTimeout(()=>keyCooldown[e.code]=false, COOLDOWN_TIME);
+
+    // 方向键逻辑
+    switch(e.key){
+        case "ArrowLeft":
+            e.preventDefault();
+            if(!collide(current.shape,current.x-1,current.y)){
+                current.x--;
+                soundMove();
+            }
+            break;
+        case "ArrowRight":
+            e.preventDefault();
+            if(!collide(current.shape,current.x+1,current.y)){
+                current.x++;
+                soundMove();
+            }
+            break;
+        case "ArrowDown":
+            e.preventDefault();
+            drop();
+            break;
+        case "ArrowUp":
+            e.preventDefault();
+            let s=rotate(current.shape);
+            if(!collide(s,current.x,current.y)){
+                current.shape=s;
+                soundRotate();
+            }
+            break;
+        case " ":
+            e.preventDefault();
+            while(!collide(current.shape,current.x,current.y+1)) current.y++;
+            lock();
+            break;
+    }
+    drawBoard();
+});
+
+document.getElementById("start").onclick=startGame;
+document.getElementById("pause").onclick=togglePause;
+drawBoard();
+</script>
+</body>
+</html>
